@@ -7,7 +7,7 @@ import java.io.Serializable;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
 import java.util.Set;
@@ -29,7 +29,7 @@ public class Main {
 
 	private static final String ROOT = "http://www.bbc.co.uk/food";
 
-	private static final int THREADS = 6;
+	private static final int THREADS = 5;
 
 	private static ObjectMapper JSONMAPPER = new ObjectMapper();
 
@@ -37,26 +37,27 @@ public class Main {
 
 		final String dataPath = args[0];
 
-		Connection connection = Jsoup.connect(ROOT);
-
 		// task queue, to be processed by threads
 		final Queue<ScraperTask> tasks = new LinkedBlockingQueue<>();
 
 		// for letters a-z, create index scrapers, which will create yet more scrapers
 		for (int i = 97; i <= 122; i++) {
-			tasks.add(new DishIndex(dataPath, connection, ROOT, (char)i, tasks));
+			tasks.add(new DishIndex(dataPath, ROOT, (char)i, tasks));
 		}
 
 //		tasks.add(new RecipeScraper(dataPath, connection, ROOT, "cafriela_de_frango_from_69579", "chicken"));
 //		tasks.add(new RecipeScraper(dataPath, connection, ROOT, "fish_tacos_33979", "taco"));
-//		tasks.add(new RecipeScraper(dataPath, connection, ROOT, "spanish_tomato_bread_15677", "bruschetta"));
+//		tasks.add(new RecipeScraper(dataPath, connection, ROOT, "orangeandalmondcake_72383", "bruschetta"));
+//		tasks.add(new RecipeScraper(dataPath, connection, ROOT, "applepearandapricotc_13703", "apple_chutney"));
 
 		// set up threads to consume the task queue
 		for (int i = 0; i < THREADS; i++) {
 			new Thread(() -> {
+				Connection connection = Jsoup.connect(ROOT);
 				ScraperTask task;
 				while ((task = tasks.poll()) != null) {
-					task.execute();
+					task.execute(connection);
+					System.out.println("Tasks remain: " + tasks.size());
 				}
 			}).run();
 		}
@@ -64,7 +65,7 @@ public class Main {
 
 	private interface ScraperTask {
 
-		void execute();
+		void execute(Connection connection);
 	}
 
 	private static class DishIndex implements ScraperTask {
@@ -75,16 +76,14 @@ public class Main {
 
 		private final String dataPath;
 
-		private final Connection connection;
 		private final String rootUrl;
 
 		private final Queue<ScraperTask> tasks;
 
 		private final String url;
 
-		private DishIndex(String dataPath, Connection connection, String rootUrl, char letter, Queue<ScraperTask> tasks) {
+		private DishIndex(String dataPath, String rootUrl, char letter, Queue<ScraperTask> tasks) {
 			this.dataPath = dataPath;
-			this.connection = connection;
 			this.rootUrl = rootUrl;
 
 			this.tasks = tasks;
@@ -93,7 +92,7 @@ public class Main {
 		}
 
 		@Override
-		public void execute() {
+		public void execute(Connection connection) {
 			try {
 				Document doc = connection.url(url).get();
 				Elements dishes = doc.select("#foods-by-letter ol.grid-view li");
@@ -103,7 +102,7 @@ public class Main {
 					  .map(PATTERN::matcher)
 					  .filter(Matcher::matches)
 					  .map(Matcher::group)
-					  .forEach(d -> tasks.add(new RecipeList(dataPath, connection, rootUrl, d, 1, tasks)));
+					  .forEach(d -> tasks.add(new RecipeList(dataPath, rootUrl, d, 1, tasks)));
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
@@ -119,7 +118,6 @@ public class Main {
 
 		private final String dataPath;
 
-		private final Connection connection;
 		private final String rootUrl;
 		private final String type;
 		private final int page;
@@ -128,9 +126,8 @@ public class Main {
 
 		private final String url;
 
-		private RecipeList(String dataPath, Connection connection, String rootUrl, String type, int page, Queue<ScraperTask> tasks) {
+		private RecipeList(String dataPath, String rootUrl, String type, int page, Queue<ScraperTask> tasks) {
 			this.dataPath = dataPath;
-			this.connection = connection;
 			this.rootUrl = rootUrl;
 			this.type = type;
 			this.page = page;
@@ -141,7 +138,7 @@ public class Main {
 		}
 
 		@Override
-		public void execute() {
+		public void execute(Connection connection) {
 			try {
 				Document doc = connection.url(url + "&page=" + page).get();
 
@@ -157,7 +154,7 @@ public class Main {
 						 .filter(c -> c > 15)
 						 .findFirst()
 						 .ifPresent(c -> IntStream.range(2, (int)Math.ceil(c / 15f) + 1)
-												  .forEach(p -> tasks.add(new RecipeList(dataPath, connection, rootUrl, type, p, tasks))));
+												  .forEach(p -> tasks.add(new RecipeList(dataPath, rootUrl, type, p, tasks))));
 				}
 
 				Elements recipes = doc.select("#article-list .article h3 a");
@@ -167,8 +164,7 @@ public class Main {
 					   .map(LINK_PATTERN::matcher)
 					   .filter(Matcher::matches)
 					   .map(m -> m.group(1))
-					   .peek(System.out::println)
-					   .forEach(r -> new RecipeScraper(dataPath, connection, rootUrl, r, type));
+					   .forEach(r -> tasks.add(new RecipeScraper(dataPath, rootUrl, r, type)));
 			} catch (HttpStatusException e) {
 				if (e.getStatusCode() == 503) {
 					System.out.println("*** Retry failed search for type " + type + " pg " + page);
@@ -186,18 +182,13 @@ public class Main {
 
 		private static final String RECIPE_URL = "/recipes/%s";
 
-		private final String dataPath;
-
-		private final Connection connection;
 		private final String id;
 		private final String type;
 
 		private final String url;
 		private final String dir;
 
-		private RecipeScraper(String dataPath, Connection connection, String rootUrl, String id, String type) {
-			this.dataPath = dataPath;
-			this.connection = connection;
+		private RecipeScraper(String dataPath, String rootUrl, String id, String type) {
 			this.id = id;
 			this.type = type;
 			this.url = rootUrl + String.format(RECIPE_URL, id);
@@ -214,7 +205,7 @@ public class Main {
 		}
 
 		@Override
-		public void execute() {
+		public void execute(Connection connection) {
 			try {
 				Document doc = connection.url(url).get();
 				Element el;
@@ -222,8 +213,10 @@ public class Main {
 				Recipe recipe = new Recipe();
 				recipe.id = id;
 				recipe.type = type;
-				recipe.title = doc.select(".recipe-main-info .recipe-title--small-spacing h1").first().text();
-				recipe.description = doc.select(".recipe-main-info .recipe-description").first().text();
+				recipe.title = doc.select(".recipe-main-info h1.content-title__text").first().text();
+
+				el = doc.select(".recipe-main-info .recipe-description").first();
+				recipe.description = el == null ? null : el.text();
 
 				el = doc.select(".recipe-media img.recipe-media__image").first();
 				if (el == null) el = doc.select(".recipe-media .emp-placeholder img").first();
@@ -262,28 +255,34 @@ public class Main {
 				el = doc.select("#recipe-tips .recipe-tips__text").first();
 				recipe.method.tips = el == null ? null : el.text();
 
+				recipe.ingredients = new ArrayList<>();
+				Element mainIngredients = doc.select(".recipe-ingredients-wrapper .recipe-ingredients__heading").first();
+				if (mainIngredients.nextElementSibling().tagName().equals("ul")) {
+					Recipe.IngredientsList ingredients = new Recipe.IngredientsList();
+					ingredients.title = mainIngredients.text();
+					ingredients.ingredients = mainIngredients.nextElementSibling().getElementsByTag("li").stream()
+															 .map(Element::text)
+															 .collect(Collectors.toList());
+					recipe.ingredients.add(ingredients);
+				}
+
 				Elements ingredientGroups = doc.select(".recipe-ingredients-wrapper .recipe-ingredients__sub-heading");
 				if (!ingredientGroups.isEmpty()) {
-					recipe.ingredients = ingredientGroups.stream()
-														 .map(e -> {
-															 Recipe.IngredientsList l = new Recipe.IngredientsList();
-															 l.title = e.text();
-															 l.ingredients = e.nextElementSibling().getElementsByTag("li").stream()
-																			  .map(Element::text)
-																			  .collect(Collectors.toList());
-															 return l;
-														 }).collect(Collectors.toList());
-				} else {
-					// default ingredients
-					Recipe.IngredientsList ingredients = new Recipe.IngredientsList();
-					ingredients.title = "Default";
-					ingredients.ingredients = doc.select(".recipe-ingredients-wrapper li.recipe-ingredients__list-item").stream()
-												 .map(Element::text)
-												 .collect(Collectors.toList());
-					recipe.ingredients = Collections.singletonList(ingredients);
+					recipe.ingredients.addAll(ingredientGroups.stream()
+															  .map(e -> {
+																  Recipe.IngredientsList l = new Recipe.IngredientsList();
+																  l.title = e.text();
+																  l.ingredients = e.nextElementSibling().getElementsByTag("li").stream()
+																				   .map(Element::text)
+																				   .collect(Collectors.toList());
+																  return l;
+															  }).collect(Collectors.toList()));
 				}
 
 				JSONMAPPER.writeValue(Files.newOutputStream(Paths.get(this.dir, id + ".json")), recipe);
+			} catch (RuntimeException e) {
+				System.out.println("#### Failed to process recipe id " + id);
+				e.printStackTrace();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
