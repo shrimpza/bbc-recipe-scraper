@@ -73,9 +73,10 @@ public class ChefSearch implements ScraperTask {
 				   .map(m -> m.group(1))
 				   .forEach(r -> executor.submit(() -> new RecipeScraper(dataPath, rootUrl, r).execute(connection)));
 		} catch (HttpStatusException e) {
+			// note - the search URLs often return error 503, so we re-submit this task to be tried again shortly
 			if (e.getStatusCode() == 503) {
 				System.out.println("*** Retry failed search for chef " + chef + " pg " + page);
-				executor.submit(() -> this);
+				executor.submit(() -> this.execute(connection));
 			} else {
 				e.printStackTrace();
 			}
