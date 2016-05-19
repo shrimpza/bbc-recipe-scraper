@@ -13,7 +13,7 @@ public class Main {
 
 	private static final String ROOT = "http://www.bbc.co.uk/food";
 
-	private static final int THREADS = 2;
+	private static final int THREADS = 2; // increasing this seems to introduce odd behaviour within JSoup
 
 	public static void main(String... args) throws IOException {
 		final String dataPath = args[0];
@@ -22,6 +22,8 @@ public class Main {
 
 		ExecutorService executor = Executors.newFixedThreadPool(THREADS);
 		executor.submit(() -> new ChefIndex(dataPath, ROOT, executor).execute(connection));
+
+		// since this is a hax job, for now we never know when it's completed, so you'll just have to terminate it when you think it's done (the executor keeps the main thread active)
 	}
 
 }
