@@ -71,7 +71,7 @@ public class ChefSearch implements ScraperTask {
 				   .map(LINK_PATTERN::matcher)
 				   .filter(Matcher::matches)
 				   .map(m -> m.group(1))
-				   .forEach(r -> executor.submit(() -> new RecipeScraper(dataPath, rootUrl, r).execute(connection)));
+				   .forEach(r -> executor.submit(() -> new RecipeScraper(dataPath, rootUrl, r, executor).execute(connection)));
 		} catch (HttpStatusException e) {
 			// note - the search URLs often return error 503, so we re-submit this task to be tried again shortly
 			if (e.getStatusCode() == 503) {

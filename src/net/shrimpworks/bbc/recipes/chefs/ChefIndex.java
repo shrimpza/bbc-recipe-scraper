@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.jsoup.Connection;
+import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.select.Elements;
 
@@ -46,7 +47,7 @@ public class ChefIndex implements ScraperTask {
 				 .map(PATTERN::matcher)
 				 .filter(Matcher::matches)
 				 .map(m -> m.group(1))
-				 .forEach(c -> executor.submit(() -> new ChefSearch(dataPath, rootUrl, c, 1, executor).execute(connection)));
+				 .forEach(c -> executor.submit(() -> new ChefSearch(dataPath, rootUrl, c, 1, executor).execute(Jsoup.connect(rootUrl)))); // TODO REVIEW makes a new connection per search, which will be reused by recipe lookups found by this search - is this improving the thread-related issues in jsoup?
 		} catch (IOException e) {
 			e.printStackTrace();
 		}

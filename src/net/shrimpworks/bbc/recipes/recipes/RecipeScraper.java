@@ -6,37 +6,38 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import net.shrimpworks.bbc.recipes.ScraperTask;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
-import net.shrimpworks.bbc.recipes.ScraperTask;
-
 public class RecipeScraper implements ScraperTask {
 
 	private static ObjectMapper JSONMAPPER = new ObjectMapper();
 
 	private static final String RECIPE_URL = "/recipes/%s";
-	private static final String IMAGES_PATH = "images";
 
 	private final String id;
+	private final ExecutorService executor;
 
 	private final String url;
 	private final String dir;
 
-	public RecipeScraper(String dataPath, String rootUrl, String id) {
+	public RecipeScraper(String dataPath, String rootUrl, String id, ExecutorService executor) {
 		this.id = id;
+		this.executor = executor;
 		this.url = rootUrl + String.format(RECIPE_URL, id);
 
 		// make the paths we need
-		Path path = Paths.get(dataPath);
+		Path path = Paths.get(dataPath, id);
 		try {
-			if (!Files.exists(path.resolve(IMAGES_PATH))) Files.createDirectories(path.resolve(IMAGES_PATH));
+			if (!Files.exists(path)) Files.createDirectories(path);
 		} catch (IOException e) {
 			throw new RuntimeException(e);
 		}
@@ -124,6 +125,11 @@ public class RecipeScraper implements ScraperTask {
 
 			// store the recipe
 			JSONMAPPER.writeValue(Files.newOutputStream(Paths.get(this.dir, id + ".json")), recipe);
+		} catch (IllegalArgumentException e) {
+			// TODO REVIEW this is a giant hack, because randomly jsoup will throw some assertion errors during connection.url().get().
+			System.out.println("#### Failed to process recipe id " + id + " to to weirdness, resubmitting");
+			executor.submit(() -> this.execute(connection));
+			e.printStackTrace();
 		} catch (RuntimeException e) {
 			System.out.println("#### Failed to process recipe id " + id);
 			e.printStackTrace();
@@ -144,7 +150,7 @@ public class RecipeScraper implements ScraperTask {
 		Connection.Response resultImageResponse = Jsoup.connect(url).ignoreContentType(true).execute();
 
 		// write to file
-		Files.write(Paths.get(outPath, IMAGES_PATH, name), resultImageResponse.bodyAsBytes());
+		Files.write(Paths.get(outPath, name), resultImageResponse.bodyAsBytes());
 
 		return name;
 	}
