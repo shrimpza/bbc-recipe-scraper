@@ -1,19 +1,20 @@
 package net.shrimpworks.bbc.recipes.dishes;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.concurrent.ExecutorService;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 
+import net.shrimpworks.bbc.recipes.ScraperTask;
+import net.shrimpworks.bbc.recipes.recipes.RecipeScraper;
 import org.jsoup.Connection;
 import org.jsoup.HttpStatusException;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
-
-import net.shrimpworks.bbc.recipes.ScraperTask;
-import net.shrimpworks.bbc.recipes.recipes.RecipeScraper;
 
 public class DishSearch implements ScraperTask {
 
@@ -71,6 +72,7 @@ public class DishSearch implements ScraperTask {
 				   .map(LINK_PATTERN::matcher)
 				   .filter(Matcher::matches)
 				   .map(m -> m.group(1))
+				   .filter(r -> !Files.exists(Paths.get(dataPath, r, r + ".json"))) // skip existing files
 				   .forEach(r -> executor.submit(() -> new RecipeScraper(dataPath, rootUrl, r, executor).execute(connection)));
 		} catch (HttpStatusException e) {
 			// note - the search URLs often return error 503, so we re-submit this task to be tried again shortly

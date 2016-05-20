@@ -12,7 +12,7 @@ public class Main {
 
 	private static final String ROOT = "http://www.bbc.co.uk/food";
 
-	private static final int THREADS = 5; // increasing this beyond 1 seems to introduce odd behaviour within JSoup
+	private static final int THREADS = 1; // increasing this beyond 1 seems to introduce odd behaviour within JSoup
 
 	public static void main(String... args) throws IOException {
 		final String dataPath = args[0];
