@@ -3,25 +3,26 @@ package net.shrimpworks.bbc.recipes.dishes;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.concurrent.ExecutorService;
+import java.util.Queue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
 
-import net.shrimpworks.bbc.recipes.ScraperTask;
-import net.shrimpworks.bbc.recipes.recipes.RecipeScraper;
 import org.jsoup.Connection;
 import org.jsoup.HttpStatusException;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
+import net.shrimpworks.bbc.recipes.ScraperTask;
+import net.shrimpworks.bbc.recipes.recipes.RecipeScraper;
+
 public class DishSearch implements ScraperTask {
 
 	private static final String LIST_URL = "/recipes/search?dishes[]=%s";
 
 	private static final Pattern COUNT_PATTERN = Pattern.compile("(\\d+) results.+");
-	private static final Pattern LINK_PATTERN = Pattern.compile("/food/recipes/([a-z0-9_]+)");
+	private static final Pattern LINK_PATTERN = Pattern.compile("/food/recipes/([a-z0-9_\\-]+)");
 
 	private final String dataPath;
 
@@ -29,17 +30,17 @@ public class DishSearch implements ScraperTask {
 	private final String type;
 	private final int page;
 
-	private final ExecutorService executor;
+	private final Queue<ScraperTask> taskQueue;
 
 	private final String url;
 
-	public DishSearch(String dataPath, String rootUrl, String type, int page, ExecutorService executor) {
+	public DishSearch(String dataPath, String rootUrl, String type, int page, Queue<ScraperTask> taskQueue) {
 		this.dataPath = dataPath;
 		this.rootUrl = rootUrl;
 		this.type = type;
 		this.page = page;
 
-		this.executor = executor;
+		this.taskQueue = taskQueue;
 
 		this.url = rootUrl + String.format(LIST_URL, type);
 	}
@@ -61,8 +62,7 @@ public class DishSearch implements ScraperTask {
 					 .filter(c -> c > 15)
 					 .findFirst()
 					 .ifPresent(c -> IntStream.range(2, (int)Math.ceil(c / 15f) + 1)
-											  .forEach(p -> executor.submit(() -> new DishSearch(dataPath, rootUrl, type, p,
-																								 executor))));
+											  .forEach(p -> taskQueue.add(new DishSearch(dataPath, rootUrl, type, p, taskQueue))));
 			}
 
 			Elements recipes = doc.select("#article-list .article h3 a");
@@ -73,12 +73,12 @@ public class DishSearch implements ScraperTask {
 				   .filter(Matcher::matches)
 				   .map(m -> m.group(1))
 				   .filter(r -> !Files.exists(Paths.get(dataPath, r, r + ".json"))) // skip existing files
-				   .forEach(r -> executor.submit(() -> new RecipeScraper(dataPath, rootUrl, r, executor).execute(connection)));
+				   .forEach(r -> taskQueue.add(new RecipeScraper(dataPath, rootUrl, r, taskQueue)));
 		} catch (HttpStatusException e) {
 			// note - the search URLs often return error 503, so we re-submit this task to be tried again shortly
 			if (e.getStatusCode() == 503) {
-				System.out.println("*** Retry failed search for type " + type + " pg " + page);
-				executor.submit(() -> this.execute(connection));
+				System.out.print("x");
+				taskQueue.add(this);
 			} else {
 				e.printStackTrace();
 			}

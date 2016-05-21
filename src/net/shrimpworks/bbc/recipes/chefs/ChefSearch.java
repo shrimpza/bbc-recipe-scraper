@@ -1,7 +1,9 @@
 package net.shrimpworks.bbc.recipes.chefs;
 
 import java.io.IOException;
-import java.util.concurrent.ExecutorService;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.Queue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.IntStream;
@@ -20,7 +22,7 @@ public class ChefSearch implements ScraperTask {
 	private static final String LIST_URL = "/recipes/search?chefs[]=%s";
 
 	private static final Pattern COUNT_PATTERN = Pattern.compile("(\\d+) results.+");
-	private static final Pattern LINK_PATTERN = Pattern.compile("/food/recipes/([a-z0-9_]+)");
+	private static final Pattern LINK_PATTERN = Pattern.compile("/food/recipes/([a-z0-9_\\-]+)");
 
 	private final String dataPath;
 
@@ -28,17 +30,17 @@ public class ChefSearch implements ScraperTask {
 	private final String chef;
 	private final int page;
 
-	private final ExecutorService executor;
+	private final Queue<ScraperTask> taskQueue;
 
 	private final String url;
 
-	public ChefSearch(String dataPath, String rootUrl, String chef, int page, ExecutorService executor) {
+	public ChefSearch(String dataPath, String rootUrl, String chef, int page, Queue<ScraperTask> taskQueue) {
 		this.dataPath = dataPath;
 		this.rootUrl = rootUrl;
 		this.chef = chef;
 		this.page = page;
 
-		this.executor = executor;
+		this.taskQueue = taskQueue;
 
 		this.url = rootUrl + String.format(LIST_URL, chef);
 	}
@@ -60,8 +62,7 @@ public class ChefSearch implements ScraperTask {
 					 .filter(c -> c > 15)
 					 .findFirst()
 					 .ifPresent(c -> IntStream.range(2, (int)Math.ceil(c / 15f) + 1)
-											  .forEach(p -> executor.submit(() -> new ChefSearch(dataPath, rootUrl, chef, p,
-																								 executor).execute(connection))));
+											  .forEach(p -> taskQueue.add(new ChefSearch(dataPath, rootUrl, chef, p, taskQueue))));
 			}
 
 			Elements recipes = doc.select("#article-list .article h3 a");
@@ -71,12 +72,13 @@ public class ChefSearch implements ScraperTask {
 				   .map(LINK_PATTERN::matcher)
 				   .filter(Matcher::matches)
 				   .map(m -> m.group(1))
-				   .forEach(r -> executor.submit(() -> new RecipeScraper(dataPath, rootUrl, r, executor).execute(connection)));
+				   .filter(r -> !Files.exists(Paths.get(dataPath, r, r + ".json"))) // skip existing files
+				   .forEach(r -> taskQueue.add(new RecipeScraper(dataPath, rootUrl, r, taskQueue)));
 		} catch (HttpStatusException e) {
 			// note - the search URLs often return error 503, so we re-submit this task to be tried again shortly
 			if (e.getStatusCode() == 503) {
-				System.out.println("*** Retry failed search for chef " + chef + " pg " + page);
-				executor.submit(() -> this.execute(connection));
+				System.out.print("x");
+				taskQueue.add(this);
 			} else {
 				e.printStackTrace();
 			}

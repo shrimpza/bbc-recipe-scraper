@@ -1,7 +1,7 @@
 package net.shrimpworks.bbc.recipes.dishes;
 
 import java.io.IOException;
-import java.util.concurrent.ExecutorService;
+import java.util.Queue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -22,15 +22,15 @@ public class DishIndex implements ScraperTask {
 
 	private final String rootUrl;
 
-	private final ExecutorService executor;
+	private final Queue<ScraperTask> taskQueue;
 
 	private final String url;
 
-	public DishIndex(String dataPath, String rootUrl, char letter, ExecutorService executor) {
+	public DishIndex(String dataPath, String rootUrl, char letter, Queue<ScraperTask> taskQueue) {
 		this.dataPath = dataPath;
 		this.rootUrl = rootUrl;
 
-		this.executor = executor;
+		this.taskQueue = taskQueue;
 
 		this.url = rootUrl + String.format(INDEX_URL, letter);
 	}
@@ -46,7 +46,7 @@ public class DishIndex implements ScraperTask {
 				  .map(PATTERN::matcher)
 				  .filter(Matcher::matches)
 				  .map(Matcher::group)
-				  .forEach(d -> executor.submit(() -> new DishSearch(dataPath, rootUrl, d, 1, executor)));
+				  .forEach(d -> taskQueue.add(new DishSearch(dataPath, rootUrl, d, 1, taskQueue)));
 		} catch (IOException e) {
 			e.printStackTrace();
 		}

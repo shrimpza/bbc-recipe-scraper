@@ -1,14 +1,13 @@
 package net.shrimpworks.bbc.recipes.chefs;
 
 import java.io.IOException;
-import java.util.concurrent.ExecutorService;
+import java.util.Queue;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.jsoup.Connection;
-import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.select.Elements;
 
@@ -22,15 +21,15 @@ public class ChefIndex implements ScraperTask {
 
 	private final String dataPath;
 	private final String rootUrl;
-	private final ExecutorService executor;
+	private final Queue<ScraperTask> taskQueue;
 
 	private final String url;
 
-	public ChefIndex(String dataPath, String rootUrl, ExecutorService executor) {
+	public ChefIndex(String dataPath, String rootUrl, Queue<ScraperTask> taskQueue) {
 		this.dataPath = dataPath;
 		this.rootUrl = rootUrl;
 
-		this.executor = executor;
+		this.taskQueue = taskQueue;
 
 		this.url = rootUrl + String.format(INDEX_URL, ALPHABET.map(Object::toString).collect(Collectors.joining(",")));
 	}
@@ -38,7 +37,6 @@ public class ChefIndex implements ScraperTask {
 	@Override
 	public void execute(Connection connection) {
 		try {
-			System.out.println(url);
 			Document doc = connection.url(url).get();
 			Elements chefs = doc.select("#chefs-by-letter ol.grid-view li a");
 
@@ -47,7 +45,7 @@ public class ChefIndex implements ScraperTask {
 				 .map(PATTERN::matcher)
 				 .filter(Matcher::matches)
 				 .map(m -> m.group(1))
-				 .forEach(c -> executor.submit(() -> new ChefSearch(dataPath, rootUrl, c, 1, executor).execute(Jsoup.connect(rootUrl)))); // TODO REVIEW makes a new connection per search, which will be reused by recipe lookups found by this search - is this improving the thread-related issues in jsoup?
+				 .forEach(c -> taskQueue.add(new ChefSearch(dataPath, rootUrl, c, 1, taskQueue)));
 		} catch (IOException e) {
 			e.printStackTrace();
 		}

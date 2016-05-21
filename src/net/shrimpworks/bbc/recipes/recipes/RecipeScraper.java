@@ -2,20 +2,22 @@ package net.shrimpworks.bbc.recipes.recipes;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.concurrent.ExecutorService;
+import java.util.Queue;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import net.shrimpworks.bbc.recipes.ScraperTask;
 import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
+
+import net.shrimpworks.bbc.recipes.ScraperTask;
 
 public class RecipeScraper implements ScraperTask {
 
@@ -24,14 +26,14 @@ public class RecipeScraper implements ScraperTask {
 	private static final String RECIPE_URL = "/recipes/%s";
 
 	private final String id;
-	private final ExecutorService executor;
+	private final Queue<ScraperTask> taskQueue;
 
 	private final String url;
 	private final String dir;
 
-	public RecipeScraper(String dataPath, String rootUrl, String id, ExecutorService executor) {
+	public RecipeScraper(String dataPath, String rootUrl, String id, Queue<ScraperTask> taskQueue) {
 		this.id = id;
-		this.executor = executor;
+		this.taskQueue = taskQueue;
 		this.url = rootUrl + String.format(RECIPE_URL, id);
 
 		// make the paths we need
@@ -58,8 +60,7 @@ public class RecipeScraper implements ScraperTask {
 			recipe.title = doc.select(".recipe-main-info h1.content-title__text").first().text();
 
 			// description - occasionally missing
-			recipe.description = optional(doc,
-										  ".recipe-main-info .recipe-description"); // TODO this strips formatting which relied on newlines being formed by <br/>s - maybe strip all non-br tags, then replace brs with newlines
+			recipe.description = optional(doc, ".recipe-main-info .recipe-description__text", true);
 
 			// find and download the image - if no image is found, it's probably a video, in which case also see if there's a placeholder image
 			el = doc.select(".recipe-media img.recipe-media__image").first();
@@ -93,7 +94,7 @@ public class RecipeScraper implements ScraperTask {
 			recipe.method.steps = doc.select(".recipe-method li.recipe-method__list-item").stream()
 									 .map(Element::text)
 									 .collect(Collectors.toList());
-			recipe.method.tips = optional(doc, "#recipe-tips .recipe-tips__text"); // TODO don't lose newlines, as per description above
+			recipe.method.tips = optional(doc, "#recipe-tips .recipe-tips__text", true);
 
 			// ingredients - a list which may be grouped under a single heading, or may have sub-headings with additional ingredients lists
 			// the DOM may look like one of the following: "<h2/><ol/>", "<h2/><ol/><h3/><ol/>...", "<h2/><h3/><ol/>..."
@@ -125,22 +126,33 @@ public class RecipeScraper implements ScraperTask {
 
 			// store the recipe
 			JSONMAPPER.writeValue(Files.newOutputStream(Paths.get(this.dir, id + ".json")), recipe);
-		} catch (IllegalArgumentException e) {
-			// TODO REVIEW this is a giant hack, because randomly jsoup will throw some assertion errors during connection.url().get().
-			System.out.println("#### Failed to process recipe id " + id + " to to weirdness, resubmitting");
-			executor.submit(() -> this.execute(connection));
+		} catch (SocketTimeoutException | IllegalArgumentException e) {
+			System.out.print("R");
+			taskQueue.add(this);
 			e.printStackTrace();
 		} catch (RuntimeException e) {
-			System.out.println("#### Failed to process recipe id " + id);
+			System.out.printf("%nFailed to process recipe %n - %s%n", url);
 			e.printStackTrace();
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
 	}
 
-	private String optional(Document document, String selector) {
+	private String optional(Document document, String selector, boolean textBlock) {
 		Element el = document.select(selector).first();
-		return el == null ? null : el.text();
+
+		if (el != null && textBlock) {
+			return el.childNodes().stream()
+					 .map(n -> n.nodeName().equals("br") ? "\n" : n.toString().trim())
+					 .filter(s -> !s.isEmpty())
+					 .collect(Collectors.joining());
+		} else {
+			return el == null ? null : el.text();
+		}
+	}
+
+	private String optional(Document document, String selector) {
+		return optional(document, selector, false);
 	}
 
 	private String downloadImage(String url, String outPath) throws IOException {
